@@ -63,6 +63,11 @@ func (f *Forth) nextWord() string {
 	return word
 }
 
+func (f *Forth) runWords(word []string) {
+	for _, w := range word {
+		f.runWord(w)
+	}
+}
 func (f *Forth) runWord(word string) {
 	// First see if it is an integer.
 	i, err := strconv.ParseInt(word, 10, 64)
@@ -84,38 +89,60 @@ func (f *Forth) RunProgram(prog string) {
 	}
 }
 
-func (f *Forth) InitWords() {
-	compileStepsUntil := func(end string) []string {
-		var steps []string
-		for {
-			w := f.nextWord()
+func (f *Forth) compileStepsUntil(enders ...string) (end string, steps []string) {
+	for {
+		w := f.nextWord()
+		for _, end = range enders {
 			if w == end {
-				break
-			}
-			if imm, ok := f.immediate[w]; ok {
-				steps = append(steps, imm())
-			} else {
-				steps = append(steps, w)
+				return
 			}
 		}
-		return steps
+		if imm, ok := f.immediate[w]; ok {
+			steps = append(steps, imm())
+		} else {
+			steps = append(steps, w)
+		}
 	}
+}
 
+func (f *Forth) InitWords() {
 	f.immediate = idict{
+		"if": func() string {
+			name := fmt.Sprintf("if_%d_", f.here)
+			f.here++ // we needed a unique name.
+			var then_steps, else_steps []string
+			ender, then_steps := f.compileStepsUntil("else", "then")
+			if ender == "else" {
+				_, else_steps = f.compileStepsUntil("then")
+			}
+			fn := func() {
+				if f.d.pop() != 0 {
+					f.runWords(then_steps)
+				} else {
+					f.runWords(else_steps)
+				}
+			}
+			f.words[name] = fn
+			return name
+		},
 		"do": func() string {
-			// Use f.here for deterministic, unique name.
-			name := fmt.Sprintf("do_%d", f.here)
-			f.here++
-			steps := compileStepsUntil("loop")
+			name := fmt.Sprintf("do_%d_", f.here)
+			f.here++ // we needed a unique name.
+			_, steps := f.compileStepsUntil("loop")
 			fn := func() {
 				i := f.d.pop()
 				limit := f.d.pop()
 				for ; i < limit; i++ {
+					// We don't have a Forth way to access `limit`
+					// or change `i` (yet) but let's put them
+					// both on the r-stack anyway.
+					f.r.push(limit)
+					f.r.push(i)
 					for _, w := range steps {
-						f.r.push(i)
 						f.runWord(w)
-						f.r.pop()
 					}
+					i = f.r.pop()
+					limit = f.r.pop()
 				}
 			}
 			f.words[name] = fn
@@ -146,7 +173,7 @@ func (f *Forth) InitWords() {
 		},
 		":": func() {
 			name := f.nextWord()
-			steps := compileStepsUntil(";")
+			_, steps := f.compileStepsUntil(";")
 			fn := func() {
 				for _, w := range steps {
 					f.runWord(w)
@@ -159,13 +186,16 @@ func (f *Forth) InitWords() {
 			x := f.d.pop()
 			f.mem[i] = x
 		},
-		"@": func() {
-			i := f.d.pop()
-			f.d.push(f.mem[i])
-		},
+		"@": func() { f.d.push(f.mem[f.d.pop()]) },
 		"dup": func() {
 			x := f.d.pop()
 			f.d.push(x)
+			f.d.push(x)
+		},
+		"swap": func() {
+			y := f.d.pop()
+			x := f.d.pop()
+			f.d.push(y)
 			f.d.push(x)
 		},
 		".": func() {
@@ -180,6 +210,8 @@ func (f *Forth) InitWords() {
 			f.r.push(x)
 			f.d.push(x)
 		},
+		">r": func() { f.r.push(f.d.pop()) },
+		"r>": func() { f.d.push(f.r.pop()) },
 		"emit": func() {
 			x := f.d.pop()
 			f.emit(byte(x))
