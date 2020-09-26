@@ -8,22 +8,22 @@ import (
 )
 
 type (
-	dict  map[string]func()
-	idict map[string]func() string
-	stack struct {
+	Dict  map[string]func()
+	Idict map[string]func() string
+	Stack struct {
 		v []int
 	}
 	Forth struct {
-		words     dict
-		immediate idict
-		d         stack
-		r         stack
+		Words     Dict
+		Immediate Idict
+		D         Stack
+		R         Stack
 		input     []string
-		mem       [100]int
-		here      int
-		emit      emitFn
+		Mem       [100]int
+		Here      int
+		Emit      EmitFn
 	}
-	emitFn func(ch byte)
+	EmitFn func(ch byte)
 )
 
 func RunForth(prog string) string {
@@ -35,25 +35,25 @@ func RunForth(prog string) string {
 	return string(output)
 }
 
-func NewForth(emit emitFn) *Forth {
+func NewForth(emit EmitFn) *Forth {
 	f := &Forth{
-		emit: emit,
+		Emit: emit,
 	}
 	f.InitWords()
 	return f
 }
 
-func (o *stack) push(x int) {
+func (o *Stack) Push(x int) {
 	o.v = append(o.v, x)
 }
 
-func (o *stack) pop() int {
+func (o *Stack) Pop() int {
 	z := o.v[len(o.v)-1]
 	o.v = o.v[:len(o.v)-1]
 	return z
 }
 
-func (o *stack) String() string {
+func (o *Stack) String() string {
 	return fmt.Sprintf("%#v", o.v)
 }
 
@@ -72,11 +72,11 @@ func (f *Forth) runWord(word string) {
 	// First see if it is an integer.
 	i, err := strconv.ParseInt(word, 10, 64)
 	if err == nil {
-		f.d.push(int(i))
+		f.D.Push(int(i))
 		return
 	}
 	// Or else it should be a defined word.
-	fn, ok := f.words[word]
+	fn, ok := f.Words[word]
 	if !ok {
 		log.Panicf("forth: word not found: %q", word)
 	}
@@ -97,66 +97,69 @@ func (f *Forth) compileStepsUntil(enders ...string) (end string, steps []string)
 				return
 			}
 		}
-		if imm, ok := f.immediate[w]; ok {
+		// First look to see if it is an Immediate word.
+		if imm, ok := f.Immediate[w]; ok {
+			// If so, execute the Immediate function, and append the result.
 			steps = append(steps, imm())
 		} else {
+			// Or append the normal word.
 			steps = append(steps, w)
 		}
 	}
 }
 
 func (f *Forth) InitWords() {
-	f.immediate = idict{
+	f.Immediate = Idict{
 		"if": func() string {
-			name := fmt.Sprintf("if_%d_", f.here)
-			f.here++ // we needed a unique name.
+			name := fmt.Sprintf("if_%d_", f.Here)
+			f.Here++ // we needed a unique name.
 			var then_steps, else_steps []string
 			ender, then_steps := f.compileStepsUntil("else", "then")
 			if ender == "else" {
 				_, else_steps = f.compileStepsUntil("then")
 			}
 			fn := func() {
-				if f.d.pop() != 0 {
+				if f.D.Pop() != 0 {
 					f.runWords(then_steps)
 				} else {
 					f.runWords(else_steps)
 				}
 			}
-			f.words[name] = fn
+			f.Words[name] = fn
 			return name
 		},
 		"do": func() string {
-			name := fmt.Sprintf("do_%d_", f.here)
-			f.here++ // we needed a unique name.
+			name := fmt.Sprintf("do_%d_", f.Here) // Use Here to create a unique name,
+			f.Here++                              // then waste a slot.
 			_, steps := f.compileStepsUntil("loop")
 			fn := func() {
-				i := f.d.pop()
-				limit := f.d.pop()
+				i := f.D.Pop()
+				limit := f.D.Pop()
 				for ; i < limit; i++ {
 					// We don't have a Forth way to access `limit`
 					// or change `i` (yet) but let's put them
-					// both on the r-stack anyway.
-					f.r.push(limit)
-					f.r.push(i)
+					// both on the R-Stack anyway.
+					f.R.Push(limit)
+					f.R.Push(i)
 					for _, w := range steps {
 						f.runWord(w)
 					}
-					i = f.r.pop()
-					limit = f.r.pop()
+					i = f.R.Pop()
+					limit = f.R.Pop()
 				}
 			}
-			f.words[name] = fn
+			f.Words[name] = fn
 			return name
 		},
 	}
 	binop := func(op func(int, int) int) func() {
 		return func() {
-			y := f.d.pop()
-			x := f.d.pop()
-			f.d.push(op(x, y))
+			y := f.D.Pop()
+			x := f.D.Pop()
+			f.D.Push(op(x, y))
 		}
 	}
-	f.words = dict{
+	f.Words = Dict{
 		"+": binop(func(x, y int) int { return x + y }),
 		"-": binop(func(x, y int) int { return x - y }),
 		"*": binop(func(x, y int) int { return x * y }),
@@ -164,12 +167,12 @@ func (f *Forth) InitWords() {
 		"%": binop(func(x, y int) int { return x % y }),
 		"variable": func() {
 			name := f.nextWord()
-			i := f.here
-			f.here++
+			i := f.Here
+			f.Here++
 			fn := func() {
-				f.d.push(i)
+				f.D.Push(i)
 			}
-			f.words[name] = fn
+			f.Words[name] = fn
 		},
 		":": func() {
 			name := f.nextWord()
@@ -179,52 +182,52 @@ func (f *Forth) InitWords() {
 					f.runWord(w)
 				}
 			}
-			f.words[name] = fn
+			f.Words[name] = fn
 		},
 		"!": func() {
-			i := f.d.pop()
-			x := f.d.pop()
-			f.mem[i] = x
+			i := f.D.Pop()
+			x := f.D.Pop()
+			f.Mem[i] = x
 		},
-		"@": func() { f.d.push(f.mem[f.d.pop()]) },
+		"@": func() { f.D.Push(f.Mem[f.D.Pop()]) },
 		"dup": func() {
-			x := f.d.pop()
-			f.d.push(x)
-			f.d.push(x)
+			x := f.D.Pop()
+			f.D.Push(x)
+			f.D.Push(x)
 		},
 		"swap": func() {
-			y := f.d.pop()
-			x := f.d.pop()
-			f.d.push(y)
-			f.d.push(x)
+			y := f.D.Pop()
+			x := f.D.Pop()
+			f.D.Push(y)
+			f.D.Push(x)
 		},
 		".": func() {
-			x := f.d.pop()
+			x := f.D.Pop()
 			s := fmt.Sprintf("%d ", x)
 			for _, ch := range s {
-				f.emit(byte(ch))
+				f.Emit(byte(ch))
 			}
 		},
 		"i": func() {
-			x := f.r.pop()
-			f.r.push(x)
-			f.d.push(x)
+			x := f.R.Pop()
+			f.R.Push(x)
+			f.D.Push(x)
 		},
-		">r": func() { f.r.push(f.d.pop()) },
-		"r>": func() { f.d.push(f.r.pop()) },
+		">r": func() { f.R.Push(f.D.Pop()) },
+		"r>": func() { f.D.Push(f.R.Pop()) },
 		"emit": func() {
-			x := f.d.pop()
-			f.emit(byte(x))
+			x := f.D.Pop()
+			f.Emit(byte(x))
 		},
-		"bl": func() { f.d.push(' ') },
-		"cr": func() { f.emit('\n') },
+		"bl": func() { f.D.Push(' ') },
+		"cr": func() { f.Emit('\n') },
 		"?": func() {
 			log.Printf("----------------")
-			log.Printf("d stack: %v", f.d)
-			log.Printf("r stack: %v", f.r)
-			for i, e := range f.mem {
+			log.Printf("D Stack: %v", f.D)
+			log.Printf("R Stack: %v", f.R)
+			for i, e := range f.Mem {
 				if e != 0 {
-					log.Printf("mem[%d] = %d", i, e)
+					log.Printf("Mem[%d] = %d", i, e)
 				}
 			}
 			log.Printf("================")

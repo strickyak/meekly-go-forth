@@ -20,21 +20,23 @@ func TestRunForth(t *testing.T) {
 		{": tmp 0 if 100 else 33 then . ; tmp", "33 "},
 		{": tmp 88 1 if 100 then . ; tmp", "100 "},
 		{": tmp 88 0 if 100 then . ; tmp", "88 "},
-		{`variable a
-      variable b
-      20 a ! 80 b !
-      a @ b @ * .`, "1600 "},
-		{`variable a
-      variable b
-      : fib
-          1 b !  0 a !
-          0 do
-            a @ b @ +
-            dup .
-              b @ a !
-            b !
-          loop ;
-      10 fib`, "1 2 3 5 8 13 21 34 55 89 "},
+		{`
+                     variable a
+                     variable b
+                     20 a ! 80 b !
+                     a @ b @ * .`, "1600 "},
+		{`
+                     variable a
+                     variable b
+                     : fib
+                         1 b !  0 a !
+                         0 do
+                           a @ b @ +
+                           dup .
+                             b @ a !
+                           b !
+                         loop ;
+                     10 fib`, "1 2 3 5 8 13 21 34 55 89 "},
 	}
 	for _, test := range tests {
 		log.Printf("RunForth(%q)...", test.prog)
